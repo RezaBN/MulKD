@@ -1,1 +1,92 @@
-{"cells":[{"cell_type":"code","source":["# config.py\n","\"\"\"\n","This file contains all the configurations, global constants, and hyperparameters\n","for the MulKD CIFAR-10 evaluation script.\n","\"\"\"\n","\n","import torch\n","import os\n","\n","# --- Environment and Path Configuration ---\n","# Attempt to mount Google Drive if in Colab environment\n","try:\n","    from google.colab import drive\n","    drive.mount('/content/drive')\n","    print(\"Google Drive mounted successfully.\")\n","    # Define base path for Google Drive after successful mount\n","    GDRIVE_BASE_PATH = '/content/drive/MyDrive/MyMLProjects/MulKD_CIFAR10'\n","except (ImportError, Exception) as e:\n","    if isinstance(e, ImportError):\n","        print(\"Google Colab 'drive' module not found. Assuming local execution.\")\n","    else:\n","        print(f\"Could not mount Google Drive: {e}\")\n","    print(\"Models and plots will be saved in the local './MulKD_CIFAR10_Results' directory.\")\n","    GDRIVE_BASE_PATH = './MulKD_CIFAR10_Results' # Default local path\n","\n","# --- Visualization & Metrics Library Flags ---\n","# These flags are checked in the plotting module to avoid errors if libraries are not installed.\n","try:\n","    import matplotlib.pyplot\n","    MATPLOTLIB_AVAILABLE = True\n","except ImportError:\n","    MATPLOTLIB_AVAILABLE = False\n","    print(\"Warning: matplotlib not found. Skipping results visualization. Install with: pip install matplotlib\")\n","\n","try:\n","    from sklearn.metrics import confusion_matrix\n","    SKLEARN_AVAILABLE = True\n","except ImportError:\n","    SKLEARN_AVAILABLE = False\n","    print(\"Warning: scikit-learn not found. Skipping confusion matrix generation. Install with: pip install scikit-learn\")\n","\n","try:\n","    import seaborn\n","    SEABORN_AVAILABLE = True\n","except ImportError:\n","    SEABORN_AVAILABLE = False\n","    print(\"Warning: seaborn not found. Confusion matrix will be basic if plotted. Install with: pip install seaborn\")\n","\n","\n","# --- Core Configuration ---\n","DEVICE = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n","CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)\n","CIFAR10_STD = (0.2023, 0.1994, 0.2010)\n","CIFAR10_CLASSES = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')\n","DATASET_SUBSET_FRACTION = 0.2 # Use 20% of the dataset for faster execution\n","\n","\n","# --- Hyperparameters ---\n","BATCH_SIZE = 64\n","EPOCHS_TEACHER_CIFAR10 = 160 # Epochs for pre-trained teachers\n","EPOCHS_STUDENT_CIFAR10 = 100 # Epochs for student models in the new scenario\n","WEIGHT_DECAY = 0.0005\n","MOMENTUM = 0.9\n","LR_RESNET_CIFAR10 = 0.1\n","LR_LIGHTWEIGHT_CIFAR10 = 0.01\n","\n","# Learning Rate Decay Schedules\n","LR_DECAY_EPOCHS_50_CIFAR10 = [30, 40]   # Example for 50 epochs\n","LR_DECAY_EPOCHS_100_CIFAR10 = [60, 80]  # For 100-epoch runs (students)\n","LR_DECAY_EPOCHS_160_CIFAR10 = [80, 120] # For 160-epoch runs (teachers)\n","LR_DECAY_RATE = 0.1\n","\n","# Distillation Hyperparameters\n","TEMPERATURE_LOGITS = 4.0\n","\n","# MulKD: Logits (KD) + CRD\n","distill_config_mulkd = {\n","    'lambda_logits': 0.5,\n","    'lambda_crd': 0.8,\n","    'crd_feat_dim': 128,\n","    'crd_nce_t': 0.07,\n","    'crd_num_negatives': 256\n","}\n","\n","# Training from scratch (no distillation)\n","distill_config_scratch = {\n","    'lambda_logits': 0.0,\n","    'lambda_crd': 0.0,\n","    'crd_feat_dim': 128, # Placeholder, not used\n","    'crd_nce_t': 0.07,   # Placeholder, not used\n","    'crd_num_negatives': 256, # Placeholder, not used\n","}"],"outputs":[],"execution_count":null,"metadata":{"id":"ek77QOXaBeYO"}}],"metadata":{"colab":{"provenance":[]},"kernelspec":{"display_name":"Python 3","name":"python3"}},"nbformat":4,"nbformat_minor":0}
+# config.py
+"""
+This file contains all the configurations, global constants, and hyperparameters
+for the MulKD CIFAR-10 evaluation script.
+"""
+
+import torch
+import os
+
+# --- Environment and Path Configuration ---
+# Attempt to mount Google Drive if in Colab environment
+try:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    print("Google Drive mounted successfully.")
+    # Define base path for Google Drive after successful mount
+    GDRIVE_BASE_PATH = '/content/drive/MyDrive/MyMLProjects/MulKD_CIFAR10'
+except (ImportError, Exception) as e:
+    if isinstance(e, ImportError):
+        print("Google Colab 'drive' module not found. Assuming local execution.")
+    else:
+        print(f"Could not mount Google Drive: {e}")
+    print("Models and plots will be saved in the local './MulKD_CIFAR10_Results' directory.")
+    GDRIVE_BASE_PATH = './MulKD_CIFAR10_Results' # Default local path
+
+# --- Visualization & Metrics Library Flags ---
+# These flags are checked in the plotting module to avoid errors if libraries are not installed.
+try:
+    import matplotlib.pyplot
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("Warning: matplotlib not found. Skipping results visualization. Install with: pip install matplotlib")
+
+try:
+    from sklearn.metrics import confusion_matrix
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    print("Warning: scikit-learn not found. Skipping confusion matrix generation. Install with: pip install scikit-learn")
+
+try:
+    import seaborn
+    SEABORN_AVAILABLE = True
+except ImportError:
+    SEABORN_AVAILABLE = False
+    print("Warning: seaborn not found. Confusion matrix will be basic if plotted. Install with: pip install seaborn")
+
+
+# --- Core Configuration ---
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
+CIFAR10_STD = (0.2023, 0.1994, 0.2010)
+CIFAR10_CLASSES = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+DATASET_SUBSET_FRACTION = 0.2 # Use 20% of the dataset for faster execution
+
+
+# --- Hyperparameters ---
+BATCH_SIZE = 64
+EPOCHS_TEACHER_CIFAR10 = 160 # Epochs for pre-trained teachers
+EPOCHS_STUDENT_CIFAR10 = 100 # Epochs for student models in the new scenario
+WEIGHT_DECAY = 0.0005
+MOMENTUM = 0.9
+LR_RESNET_CIFAR10 = 0.1
+LR_LIGHTWEIGHT_CIFAR10 = 0.01
+
+# Learning Rate Decay Schedules
+LR_DECAY_EPOCHS_50_CIFAR10 = [30, 40]   # Example for 50 epochs
+LR_DECAY_EPOCHS_100_CIFAR10 = [60, 80]  # For 100-epoch runs (students)
+LR_DECAY_EPOCHS_160_CIFAR10 = [80, 120] # For 160-epoch runs (teachers)
+LR_DECAY_RATE = 0.1
+
+# Distillation Hyperparameters
+TEMPERATURE_LOGITS = 4.0
+
+# MulKD: Logits (KD) + CRD
+distill_config_mulkd = {
+    'lambda_logits': 0.5,
+    'lambda_crd': 0.8,
+    'crd_feat_dim': 128,
+    'crd_nce_t': 0.07,
+    'crd_num_negatives': 256
+}
+
+# Training from scratch (no distillation)
+distill_config_scratch = {
+    'lambda_logits': 0.0,
+    'lambda_crd': 0.0,
+    'crd_feat_dim': 128, # Placeholder, not used
+    'crd_nce_t': 0.07,   # Placeholder, not used
+    'crd_num_negatives': 256, # Placeholder, not used
+}
