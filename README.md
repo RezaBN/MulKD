@@ -65,7 +65,7 @@ pip install torch torchvision numpy matplotlib scikit-learn seaborn
 1.  **Clone the repository:**
 
     ```bash
-    git clone https://github.com/your-username/MulKD-CIFAR10.git
+    git clone https://github.com/RezaBN/MulKD.git
     cd MulKD-CIFAR10
     ```
 
