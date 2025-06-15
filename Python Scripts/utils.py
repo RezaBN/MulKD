@@ -1,1 +1,171 @@
-{"cells":[{"cell_type":"code","source":["# utils.py\n","\"\"\"\n","This file contains core utility functions for the training and evaluation loop,\n","such as training for one epoch, testing the model, and adjusting the learning rate.\n","\"\"\"\n","\n","import torch\n","import torch.nn.functional as F\n","import time\n","\n","# Import from local modules\n","from config import DEVICE, TEMPERATURE_LOGITS\n","from models import get_model_output\n","\n","\n","def adjust_learning_rate(optimizer, epoch, initial_lr, decay_epochs_list, decay_rate_val):\n","    \"\"\"\n","    Sets the learning rate to the initial LR decayed by decay_rate_val at specified epochs.\n","    \"\"\"\n","    lr = initial_lr\n","    # Sort the decay epochs to handle them in order\n","    for de_epoch in sorted(decay_epochs_list):\n","        if epoch >= de_epoch:\n","            lr *= decay_rate_val\n","        else:\n","            # No need to check further if current epoch is before this decay point\n","            break\n","\n","    # Apply the new learning rate to the optimizer\n","    for param_group in optimizer.param_groups:\n","        param_group['lr'] = lr\n","\n","    # Print LR change information on the first epoch or on decay epochs\n","    if epoch == 0 or any(epoch == de for de in decay_epochs_list):\n","        print(f\"LR for epoch {epoch+1} set to {lr:.0e}\")\n","\n","\n","def train_one_epoch(epoch_num, total_epochs, model, trainloader, optimizer, criterion_ce,\n","                    current_distill_config, teacher_model_single=None,\n","                    ensemble_teacher_models=None, crd_loss_instance=None):\n","    \"\"\"\n","    Performs one full training epoch for a given model.\n","    \"\"\"\n","    model.train()\n","    if teacher_model_single: teacher_model_single.eval()\n","    if ensemble_teacher_models:\n","        for t_model in ensemble_teacher_models: t_model.eval()\n","\n","    running_loss, running_loss_ce, running_loss_kd, running_loss_crd = 0.0, 0.0, 0.0, 0.0\n","    correct, total = 0, 0\n","\n","    active_lambda_logits = current_distill_config['lambda_logits']\n","    active_lambda_crd = current_distill_config['lambda_crd']\n","    use_crd_actual = (crd_loss_instance is not None and active_lambda_crd > 0)\n","\n","    for batch_idx, (inputs, targets) in enumerate(trainloader):\n","        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)\n","        optimizer.zero_grad()\n","\n","        student_logits, student_features = get_model_output(model, inputs, for_crd=use_crd_actual)\n","\n","        # Standard Cross-Entropy Loss\n","        loss_ce_val = criterion_ce(student_logits, targets)\n","        current_total_loss = loss_ce_val\n","        batch_loss_ce = loss_ce_val.item()\n","        batch_loss_kd, batch_loss_crd = 0.0, 0.0\n","\n","        # --- Logits Distillation (KD) ---\n","        if active_lambda_logits > 0 and (teacher_model_single or ensemble_teacher_models):\n","            teacher_logits_for_kd = None\n","            with torch.no_grad():\n","                if teacher_model_single:\n","                    teacher_logits_for_kd, _ = get_model_output(teacher_model_single, inputs)\n","                elif ensemble_teacher_models:\n","                    all_teacher_logits = [get_model_output(t, inputs)[0] for t in ensemble_teacher_models]\n","                    if all_teacher_logits:\n","                        teacher_logits_for_kd = torch.stack(all_teacher_logits).mean(dim=0)\n","\n","            if teacher_logits_for_kd is not None:\n","                loss_kd_logits_val = F.kl_div(\n","                    F.log_softmax(student_logits / TEMPERATURE_LOGITS, dim=1),\n","                    F.softmax(teacher_logits_for_kd / TEMPERATURE_LOGITS, dim=1),\n","                    reduction='batchmean'\n","                ) * (TEMPERATURE_LOGITS ** 2)\n","                current_total_loss += active_lambda_logits * loss_kd_logits_val\n","                batch_loss_kd = loss_kd_logits_val.item() * active_lambda_logits\n","\n","        # --- Contrastive Representation Distillation (CRD) ---\n","        if use_crd_actual and student_features is not None:\n","            teacher_features_for_crd = None\n","            with torch.no_grad():\n","                if teacher_model_single:\n","                    _, teacher_features_for_crd = get_model_output(teacher_model_single, inputs, for_crd=True)\n","                elif ensemble_teacher_models:\n","                    valid_feats = [get_model_output(t, inputs, for_crd=True)[1] for t in ensemble_teacher_models]\n","                    valid_feats = [f for f in valid_feats if f is not None]\n","                    if valid_feats:\n","                        teacher_features_for_crd = torch.stack(valid_feats).mean(dim=0)\n","\n","            if teacher_features_for_crd is not None:\n","                loss_crd_val = crd_loss_instance(student_features, teacher_features_for_crd)\n","                current_total_loss += active_lambda_crd * loss_crd_val\n","                batch_loss_crd = loss_crd_val.item() * active_lambda_crd\n","\n","        # --- Backward Pass and Optimization ---\n","        current_total_loss.backward()\n","        optimizer.step()\n","\n","        running_loss += current_total_loss.item()\n","        running_loss_ce += batch_loss_ce\n","        running_loss_kd += batch_loss_kd\n","        running_loss_crd += batch_loss_crd\n","\n","        _, predicted = student_logits.max(1)\n","        total += targets.size(0)\n","        correct += predicted.eq(targets).sum().item()\n","\n","    num_batches = len(trainloader)\n","    avg_epoch_total_loss = running_loss / num_batches if num_batches > 0 else 0\n","    avg_epoch_ce_loss = running_loss_ce / num_batches if num_batches > 0 else 0\n","    avg_epoch_kd_loss = running_loss_kd / num_batches if num_batches > 0 else 0\n","    avg_epoch_crd_loss = running_loss_crd / num_batches if num_batches > 0 else 0\n","    avg_epoch_acc = 100. * correct / total if total > 0 else 0\n","\n","    print(f\"Epoch {epoch_num+1}/{total_epochs} Summary: AvgLoss: {avg_epoch_total_loss:.4f} \"\n","          f\"(CE:{avg_epoch_ce_loss:.4f} KD:{avg_epoch_kd_loss:.4f} CRD:{avg_epoch_crd_loss:.4f}), \"\n","          f\"TrainAcc: {avg_epoch_acc:.2f}%\")\n","\n","    return avg_epoch_total_loss, avg_epoch_acc, avg_epoch_ce_loss, avg_epoch_kd_loss, avg_epoch_crd_loss\n","\n","\n","def test_model(epoch_num, model, testloader, criterion_ce, model_display_name=\"Model\"):\n","    \"\"\"\n","    Evaluates the model on the test dataset.\n","    Returns accuracy, average loss, and all targets/predictions for confusion matrix.\n","    \"\"\"\n","    model.eval()\n","    test_loss, correct, total = 0, 0, 0\n","    all_targets_list, all_predictions_list = [], []\n","\n","    if len(testloader) == 0:\n","        print(f\"\\nWarning: Testloader for {model_display_name} is empty. Skipping test.\")\n","        return 0.0, 0.0, torch.empty(0), torch.empty(0)\n","\n","    with torch.no_grad():\n","        for inputs, targets in testloader:\n","            inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)\n","\n","            current_logits, _ = get_model_output(model, inputs)\n","\n","            loss = criterion_ce(current_logits, targets)\n","            test_loss += loss.item()\n","\n","            _, predicted = current_logits.max(1)\n","            total += targets.size(0)\n","            correct += predicted.eq(targets).sum().item()\n","\n","            all_targets_list.append(targets.cpu())\n","            all_predictions_list.append(predicted.cpu())\n","\n","    acc = 100. * correct / total if total > 0 else 0.0\n","    avg_loss = test_loss / len(testloader) if len(testloader) > 0 else 0.0\n","    epoch_display = f\"Epoch {epoch_num+1}\" if epoch_num >= 0 else \"Loaded Model\"\n","\n","    print(f\"\\n{model_display_name} - Test Results ({epoch_display}): \"\n","          f\"Avg Loss: {avg_loss:.4f}, Acc: {acc:.2f}% ({correct}/{total})\\n\")\n","\n","    all_targets_cat = torch.cat(all_targets_list) if all_targets_list else torch.empty(0)\n","    all_predictions_cat = torch.cat(all_predictions_list) if all_predictions_list else torch.empty(0)\n","\n","    return acc, avg_loss, all_targets_cat, all_predictions_cat"],"outputs":[],"execution_count":null,"metadata":{"id":"rra1I1TxC2oF"}}],"metadata":{"colab":{"provenance":[]},"kernelspec":{"display_name":"Python 3","name":"python3"}},"nbformat":4,"nbformat_minor":0}
+# utils.py
+"""
+This file contains core utility functions for the training and evaluation loop,
+such as training for one epoch, testing the model, and adjusting the learning rate.
+"""
+
+import torch
+import torch.nn.functional as F
+import time
+
+# Import from local modules
+from config import DEVICE, TEMPERATURE_LOGITS
+from models import get_model_output
+
+
+def adjust_learning_rate(optimizer, epoch, initial_lr, decay_epochs_list, decay_rate_val):
+    """
+    Sets the learning rate to the initial LR decayed by decay_rate_val at specified epochs.
+    """
+    lr = initial_lr
+    # Sort the decay epochs to handle them in order
+    for de_epoch in sorted(decay_epochs_list):
+        if epoch >= de_epoch:
+            lr *= decay_rate_val
+        else:
+            # No need to check further if current epoch is before this decay point
+            break
+
+    # Apply the new learning rate to the optimizer
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
+    # Print LR change information on the first epoch or on decay epochs
+    if epoch == 0 or any(epoch == de for de in decay_epochs_list):
+        print(f"LR for epoch {epoch+1} set to {lr:.0e}")
+
+
+def train_one_epoch(epoch_num, total_epochs, model, trainloader, optimizer, criterion_ce,
+                    current_distill_config, teacher_model_single=None,
+                    ensemble_teacher_models=None, crd_loss_instance=None):
+    """
+    Performs one full training epoch for a given model.
+    """
+    model.train()
+    if teacher_model_single: teacher_model_single.eval()
+    if ensemble_teacher_models:
+        for t_model in ensemble_teacher_models: t_model.eval()
+
+    running_loss, running_loss_ce, running_loss_kd, running_loss_crd = 0.0, 0.0, 0.0, 0.0
+    correct, total = 0, 0
+
+    active_lambda_logits = current_distill_config['lambda_logits']
+    active_lambda_crd = current_distill_config['lambda_crd']
+    use_crd_actual = (crd_loss_instance is not None and active_lambda_crd > 0)
+
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+        optimizer.zero_grad()
+
+        student_logits, student_features = get_model_output(model, inputs, for_crd=use_crd_actual)
+
+        # Standard Cross-Entropy Loss
+        loss_ce_val = criterion_ce(student_logits, targets)
+        current_total_loss = loss_ce_val
+        batch_loss_ce = loss_ce_val.item()
+        batch_loss_kd, batch_loss_crd = 0.0, 0.0
+
+        # --- Logits Distillation (KD) ---
+        if active_lambda_logits > 0 and (teacher_model_single or ensemble_teacher_models):
+            teacher_logits_for_kd = None
+            with torch.no_grad():
+                if teacher_model_single:
+                    teacher_logits_for_kd, _ = get_model_output(teacher_model_single, inputs)
+                elif ensemble_teacher_models:
+                    all_teacher_logits = [get_model_output(t, inputs)[0] for t in ensemble_teacher_models]
+                    if all_teacher_logits:
+                        teacher_logits_for_kd = torch.stack(all_teacher_logits).mean(dim=0)
+
+            if teacher_logits_for_kd is not None:
+                loss_kd_logits_val = F.kl_div(
+                    F.log_softmax(student_logits / TEMPERATURE_LOGITS, dim=1),
+                    F.softmax(teacher_logits_for_kd / TEMPERATURE_LOGITS, dim=1),
+                    reduction='batchmean'
+                ) * (TEMPERATURE_LOGITS ** 2)
+                current_total_loss += active_lambda_logits * loss_kd_logits_val
+                batch_loss_kd = loss_kd_logits_val.item() * active_lambda_logits
+
+        # --- Contrastive Representation Distillation (CRD) ---
+        if use_crd_actual and student_features is not None:
+            teacher_features_for_crd = None
+            with torch.no_grad():
+                if teacher_model_single:
+                    _, teacher_features_for_crd = get_model_output(teacher_model_single, inputs, for_crd=True)
+                elif ensemble_teacher_models:
+                    valid_feats = [get_model_output(t, inputs, for_crd=True)[1] for t in ensemble_teacher_models]
+                    valid_feats = [f for f in valid_feats if f is not None]
+                    if valid_feats:
+                        teacher_features_for_crd = torch.stack(valid_feats).mean(dim=0)
+
+            if teacher_features_for_crd is not None:
+                loss_crd_val = crd_loss_instance(student_features, teacher_features_for_crd)
+                current_total_loss += active_lambda_crd * loss_crd_val
+                batch_loss_crd = loss_crd_val.item() * active_lambda_crd
+
+        # --- Backward Pass and Optimization ---
+        current_total_loss.backward()
+        optimizer.step()
+
+        running_loss += current_total_loss.item()
+        running_loss_ce += batch_loss_ce
+        running_loss_kd += batch_loss_kd
+        running_loss_crd += batch_loss_crd
+
+        _, predicted = student_logits.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+
+    num_batches = len(trainloader)
+    avg_epoch_total_loss = running_loss / num_batches if num_batches > 0 else 0
+    avg_epoch_ce_loss = running_loss_ce / num_batches if num_batches > 0 else 0
+    avg_epoch_kd_loss = running_loss_kd / num_batches if num_batches > 0 else 0
+    avg_epoch_crd_loss = running_loss_crd / num_batches if num_batches > 0 else 0
+    avg_epoch_acc = 100. * correct / total if total > 0 else 0
+
+    print(f"Epoch {epoch_num+1}/{total_epochs} Summary: AvgLoss: {avg_epoch_total_loss:.4f} "
+          f"(CE:{avg_epoch_ce_loss:.4f} KD:{avg_epoch_kd_loss:.4f} CRD:{avg_epoch_crd_loss:.4f}), "
+          f"TrainAcc: {avg_epoch_acc:.2f}%")
+
+    return avg_epoch_total_loss, avg_epoch_acc, avg_epoch_ce_loss, avg_epoch_kd_loss, avg_epoch_crd_loss
+
+
+def test_model(epoch_num, model, testloader, criterion_ce, model_display_name="Model"):
+    """
+    Evaluates the model on the test dataset.
+    Returns accuracy, average loss, and all targets/predictions for confusion matrix.
+    """
+    model.eval()
+    test_loss, correct, total = 0, 0, 0
+    all_targets_list, all_predictions_list = [], []
+
+    if len(testloader) == 0:
+        print(f"\nWarning: Testloader for {model_display_name} is empty. Skipping test.")
+        return 0.0, 0.0, torch.empty(0), torch.empty(0)
+
+    with torch.no_grad():
+        for inputs, targets in testloader:
+            inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+
+            current_logits, _ = get_model_output(model, inputs)
+
+            loss = criterion_ce(current_logits, targets)
+            test_loss += loss.item()
+
+            _, predicted = current_logits.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+
+            all_targets_list.append(targets.cpu())
+            all_predictions_list.append(predicted.cpu())
+
+    acc = 100. * correct / total if total > 0 else 0.0
+    avg_loss = test_loss / len(testloader) if len(testloader) > 0 else 0.0
+    epoch_display = f"Epoch {epoch_num+1}" if epoch_num >= 0 else "Loaded Model"
+
+    print(f"\n{model_display_name} - Test Results ({epoch_display}): "
+          f"Avg Loss: {avg_loss:.4f}, Acc: {acc:.2f}% ({correct}/{total})\n")
+
+    all_targets_cat = torch.cat(all_targets_list) if all_targets_list else torch.empty(0)
+    all_predictions_cat = torch.cat(all_predictions_list) if all_predictions_list else torch.empty(0)
+
+    return acc, avg_loss, all_targets_cat, all_predictions_cat
