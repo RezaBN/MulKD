@@ -32,6 +32,21 @@ This implementation includes:
   * **Dataset Subsetting**: Option to run experiments on a smaller fraction of the CIFAR-10 dataset for faster prototyping and testing.
   * **Environment Aware**: Automatically detects if running in Google Colab to save results to Google Drive, or saves locally otherwise.
 
+## Project Structure
+
+```
+.
+├── main.py                 # Main script to run the experiment
+├── config.py               # All hyperparameters and configuration
+├── models.py               # Model architecture definitions
+├── data.py                 # Dataloader for CIFAR-10
+├── losses.py               # Custom distillation loss functions (CRD)
+├── utils.py                # Core training and evaluation helper functions
+├── plotting.py             # Functions for plotting and reporting results
+├── requirements.txt        # Python package dependencies
+└── README.md               # This file
+```
+
 ## Requirements
 
 To run this project, you need Python 3 and the following libraries. You can install them using `pip`:
@@ -50,37 +65,45 @@ pip install torch torchvision numpy matplotlib scikit-learn seaborn
 1.  **Clone the repository:**
 
     ```bash
-    git clone <your-repository-url>
-    cd <repository-directory>
+    git clone https://github.com/your-username/MulKD-CIFAR10.git
+    cd MulKD-CIFAR10
     ```
 
 2.  **Configure the experiment (optional):**
-    You can modify the hyperparameters and settings directly in the `main_mulkd_cifar10_evaluation.py` script. Key parameters to consider are:
 
-      * `DATASET_SUBSET_FRACTION`: Set to `1.0` to use the full dataset or a smaller value (e.g., `0.2` for 20%) for a quick run.
-      * `GDRIVE_BASE_PATH`: If not in Google Colab, this defines the local directory where results (models and plots) will be saved. The default is `./MulKD_CIFAR10_Results`.
-      * `EPOCHS_TEACHER_CIFAR10` & `EPOCHS_STUDENT_CIFAR10`: Number of epochs for training teacher and student models, respectively.
-      * `COMPLETED_MODEL_KEYS`: A list of model names that should be loaded from checkpoints instead of being retrained. If a model is in this list and a checkpoint exists, it will be loaded. Otherwise, it will be trained. To retrain all models, make this list empty (`[]`).
+You can easily modify the experiment by editing the `config.py` file. Key parameters include:
+
+  - `DATASET_SUBSET_FRACTION`: Set this to `1.0` to use the full dataset or a smaller value (e.g., `0.2` for 20%) for faster test runs.
+  - `EPOCHS_TEACHER_CIFAR10` / `EPOCHS_STUDENT_CIFAR10`: Control the number of training epochs for teacher and student models, respectively.
+  - `GDRIVE_BASE_PATH`: Automatically detects Google Colab and saves results to Google Drive; otherwise, saves locally.
+  - `distill_config_mulkd`: Adjust the lambda weights for the KD and CRD loss components.
+
+To force a model to be retrained instead of loading from a checkpoint, open `main.py` and comment out its key from the `COMPLETED_KEYS` list.
 
 3.  **Execute the main script:**
 
-    ```bash
-    python main_mulkd_cifar10_evaluation.py
-    ```
+Simply execute the main script from your terminal:
 
-    The script will automatically download the CIFAR-10 dataset and begin the training and evaluation process. The console will display the progress for each model and scenario.
+```bash
+python main.py
+```
+
+  - The script will first download the CIFAR-10 dataset if it's not already present in `./data_cifar10/`.
+  - It will then begin the sequential training and evaluation process for all defined models.
+  - Progress will be printed to the console, including epoch summaries and test results.
+
 
 ## Expected Output
 
-All results are saved in the directory specified by `GDRIVE_BASE_PATH`. The default subdirectories are `models_20pct/` and `plots_20pct/` if using a 20% data subset.
+The script will create a results directory (by default `./MulKD_CIFAR10_Results/` or on Google Drive if run in Colab). This directory will contain:
 
-  * **Saved Models**: The best performing model checkpoint for each scenario is saved as a `.pth` file in the `models.../` directory.
-  * **Performance Summary**: A final summary table is printed to the console, comparing the accuracy, training time, and epochs for every model and method.
-  * **Plots**: Various `.png` files are saved in the `plots.../` directory:
-      * `training_progress_...png`: Shows the loss and accuracy curves over epochs for each trained model.
-      * `confusion_matrix_...png`: A confusion matrix for each evaluated model.
-      * `overall_accuracy_comparison...png`: A bar chart comparing the performance of all teacher and student models.
-      * `student_model_comparison...png`: A bar chart specifically comparing the performance of the student models under different distillation schemes.
+  - `models_20pct/`: Saved `.pth` model checkpoints for each scenario (on 20% of the data by default).
+  - `plots_20pct/`: Saved `.png` plots, including:
+      - Training progress for each model.
+      - Confusion matrices for each model's final evaluation.
+      - A summary plot comparing the performance of student models.
+
+At the end of the run, a full performance summary table will be printed to the console.
 
 ## Citation
 
