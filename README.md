@@ -8,7 +8,11 @@ The code allows for the training and evaluation of various deep learning models 
 
 Knowledge Distillation (KD) is a powerful technique for model compression, where a compact "student" model learns from a larger, pre-trained "teacher" model. However, a significant performance gap between the teacher and student can hinder effective knowledge transfer.
 
-[[1](https://www.sciencedirect.com/science/article/pii/S0952197624003282)] **MulKD** addresses this "capacity gap" by introducing a hierarchical distillation process with multiple teaching layers. Instead of a single teacher directly teaching a student, knowledge is gradually distilled through a series of "Teacher Assistants" (TAs). This multi-step approach creates progressively smaller and more suitable teachers, allowing the final student model to learn more effectively.
+[[1](https://www.sciencedirect.com/science/article/pii/S0952197624003282)] **MulKD** addresses this "capacity gap" by introducing a hierarchical distillation process with multiple teaching layers. Instead of a single teacher directly teaching a student, knowledge is gradually distilled through a series of "Teacher Assistants" (TAs). This multi-step approach creates progressively smaller and more suitable teachers, allowing the final student model to learn more effectively. The block diagram of MulKD can be observed in Figure 1 in the following.
+
+![1-s2 0-S0952197624003282-gr2_lrg](https://github.com/user-attachments/assets/f44a2d73-1cb4-401b-b4b5-71f3232960ba)
+Fig. 1. MulKD: Multi-layer knowledge distillation.
+
 
 This implementation includes:
 
