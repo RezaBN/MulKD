@@ -107,7 +107,7 @@ At the end of the run, a full performance summary table will be printed to the c
 
 ## Citation
 
-If you use this code or the MulKD method in your research, please cite the original paper:
+If you use this code or the MulKD method in your research, please cite this repository and also the original paper:
 
 ```bibtex
 @article{guermazi2024mulkd,
